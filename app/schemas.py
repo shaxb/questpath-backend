@@ -11,6 +11,9 @@ class RegisterRequest(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: str
+    display_name: Optional[str] = None
+    profile_picture: Optional[str] = None
+    total_exp: int
     
     class Config:
         from_attributes = True
@@ -19,6 +22,17 @@ class UserResponse(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: Optional[str] = None
+
+
+class OAuthLoginRequest(BaseModel):
+    email: str
+    google_id: str
+    display_name: Optional[str] = None
+    profile_picture: Optional[str] = None
 
 
 # ===== Goal Schemas =====
@@ -145,6 +159,9 @@ class LeaderboardResponse(BaseModel):
 # progress schemas
 
 class StatsResponse(BaseModel):
+    email: str
+    display_name: Optional[str] = None
+    profile_picture: Optional[str] = None
     total_exp: int
     levels_completed: int
     goal_completion_percentage: int

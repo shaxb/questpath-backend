@@ -9,7 +9,7 @@ from typing import Annotated
 from app.ai_service import generate_quiz_for_level
 
 from app.schemas import QuizSubmitRequest, QuizResultResponse
-from app.models import Level, Roadmap, Goal, User, LevelStatus
+from app.models import Level, Roadmap, Goal, User, LevelStatus, GoalStatus
 from app.config import settings
 
 router = APIRouter(prefix="/levels", tags=["levels"])
@@ -92,7 +92,27 @@ async def submit_level_quiz(
         from app.models import LevelStatus
         if level.status != LevelStatus.COMPLETED:
             level.status = LevelStatus.COMPLETED
-        
+   
+        # change goal status to in progress or completed
+        goal_result = await db.execute(
+            select(Goal)
+            .join(Roadmap, Goal.id == Roadmap.goal_id)
+            .join(Level, Roadmap.id == Level.roadmap_id)
+            .where(Level.id == level.id)
+        )
+        goal = goal_result.scalars().first()
+        if goal:
+            # Check if all levels in the roadmap are completed
+            levels_result = await db.execute(
+                select(Level)
+                .where(Level.roadmap_id == level.roadmap_id)
+            )
+            levels = levels_result.scalars().all()
+            if all(l.status == LevelStatus.COMPLETED for l in levels):
+                goal.status = GoalStatus.COMPLETED
+            else:
+                goal.status = GoalStatus.IN_PROGRESS
+
         # Unlock next level
         next_level_result = await db.execute(
             select(Level)

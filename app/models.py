@@ -32,9 +32,17 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=True)  # Nullable for OAuth users
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     total_exp: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # authentication
+    refresh_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # OAuth fields
+    google_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    profile_picture: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationship (NOT a database column)
     goals: Mapped[list["Goal"]] = relationship("Goal", back_populates="user")

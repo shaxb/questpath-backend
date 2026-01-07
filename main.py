@@ -1,15 +1,22 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.config import settings
 
 app = FastAPI(title="QuestPath API", version="1.0.0")
 
 # CORS middleware - allows frontend to call API
+allowed_origins = [
+    "http://localhost:3000",  # Local development
+    "http://localhost:3001",  # Alternate port
+    settings.frontend_url,     # Production frontend (Vercel)
+]
+
+# Remove duplicates and empty strings
+allowed_origins = list(set(filter(None, allowed_origins)))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Next.js default
-        "http://localhost:5173",  # Vite default
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,3 +35,9 @@ app.include_router(goals_router)
 app.include_router(quizzes_router)
 app.include_router(progression_router)
 app.include_router(leaderboard_router)
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for deployment platforms"""
+    return {"status": "healthy", "environment": settings.environment}

@@ -46,8 +46,11 @@ async def get_user_progression(
     )
     total_levels = result.scalar_one()
 
-    return {
-        "total_exp": total_xp,
-        "levels_completed": levels_completed, 
-        "goal_completion_percentage": int(levels_completed / total_levels * 100) if total_levels > 0 else 0
-    }
+    return StatsResponse(
+        email=current_user.email,
+        display_name=current_user.display_name,
+        profile_picture=current_user.profile_picture,
+        total_exp=total_xp,
+        levels_completed=levels_completed,
+        goal_completion_percentage=int(levels_completed / total_levels * 100) if total_levels > 0 else 0
+    )
