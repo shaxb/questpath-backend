@@ -1,6 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="QuestPath API", version="1.0.0")
 
@@ -13,6 +18,11 @@ allowed_origins = [
 
 # Remove duplicates and empty strings
 allowed_origins = list(set(filter(None, allowed_origins)))
+
+# Log CORS configuration for debugging
+logger.info(f"🔧 CORS allowed origins: {allowed_origins}")
+logger.info(f"🌍 FRONTEND_URL from env: {settings.frontend_url}")
+logger.info(f"🔒 Environment: {settings.environment}")
 
 app.add_middleware(
     CORSMiddleware,
