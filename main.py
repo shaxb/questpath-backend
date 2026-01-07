@@ -37,6 +37,17 @@ app.include_router(progression_router)
 app.include_router(leaderboard_router)
 
 
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "QuestPath API", 
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for deployment platforms"""

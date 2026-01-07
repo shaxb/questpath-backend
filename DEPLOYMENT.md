@@ -62,7 +62,7 @@ git push -u origin main
 4. Add Environment Variables (click "Advanced" → "Add Environment Variable"):
    ```
    DATABASE_URL = <paste your Internal Database URL with +asyncpg>
-   REDIS_URL = <paste your Upstash Redis URL>
+   REDIS_URL = <paste your Upstash Redis    URL>
    JWT_SECRET = <generate random string, e.g., run: python -c "import secrets; print(secrets.token_urlsafe(32))">
    OPENAI_API_KEY = <your OpenAI API key>
    FRONTEND_URL = https://questpath.vercel.app (you'll update this later)
