@@ -10,7 +10,7 @@
 ## 🔴 Tier 1: High Impact, Production Essentials (Week 1-2)
 
 ### 1. Redis Caching ⭐ **HIGHEST PRIORITY**
-- [ ] Setup Redis server locally
+- [] Setup Redis server locally
 - [ ] Install redis-py and aioredis
 - [ ] Cache leaderboard (5-minute TTL)
 - [ ] Cache user stats (1-minute TTL)

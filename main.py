@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 import logging
@@ -12,17 +12,14 @@ app = FastAPI(title="QuestPath API", version="1.0.0")
 # CORS middleware - allows frontend to call API
 allowed_origins = [
     "http://localhost:3000",  # Local development
-    "http://localhost:3001",  # Alternate port
+    "http://localhost:3001",
+    "http://192.168.100.151:3000",  # Alternate port
     settings.frontend_url,     # Production frontend (Vercel)
 ]
 
 # Remove duplicates and empty strings
 allowed_origins = list(set(filter(None, allowed_origins)))
 
-# Log CORS configuration for debugging
-logger.info(f"🔧 CORS allowed origins: {allowed_origins}")
-logger.info(f"🌍 FRONTEND_URL from env: {settings.frontend_url}")
-logger.info(f"🔒 Environment: {settings.environment}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,6 +28,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Include your routers here
 from app.users import router as users_router
@@ -62,3 +60,4 @@ async def root():
 async def health_check():
     """Health check endpoint for deployment platforms"""
     return {"status": "healthy", "environment": settings.environment}
+

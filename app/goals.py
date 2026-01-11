@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -10,14 +10,15 @@ from .models import User, Goal, Roadmap, Level, GoalStatus, DifficultyLevel, Lev
 from .schemas import CreateGoalRequest, GoalResponse, GoalListItem
 from .auth import get_current_user
 from .ai_service import generate_roadmap
-
+from .rate_limiter import check_rate_limit
 
 router = APIRouter(prefix="/goals", tags=["goals"])
 
 
 @router.post("", response_model=GoalResponse, status_code=201)
 async def create_goal(
-    request: CreateGoalRequest,
+    request: Request,
+    incoming_request: CreateGoalRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
@@ -29,15 +30,18 @@ async def create_goal(
     3. Store Goal + Roadmap + Levels in database
     4. Return complete goal with roadmap
     """
+    # Rate limiting: 5 goals per hour (AI generation is expensive)
+    await check_rate_limit(request, "create_goal", limit=5, window=360)
+    
     try:
         # Step 1: Generate roadmap using AI
-        ai_data = await generate_roadmap(request.description)
+        ai_data = await generate_roadmap(incoming_request.description)
         
         # Step 2: Create Goal
         goal = Goal(
             user_id=current_user.id,
             title=ai_data["title"],
-            description=request.description,
+            description=incoming_request.description,
             category=ai_data["category"],
             difficulty_level=DifficultyLevel(ai_data["difficulty"]),
             status=GoalStatus.NOT_STARTED

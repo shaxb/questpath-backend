@@ -34,7 +34,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=True)  # Nullable for OAuth users
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    total_exp: Mapped[int] = mapped_column(Integer, default=0)
+    total_exp: Mapped[int] = mapped_column(Integer, default=0, index=True) 
     
     # authentication
     refresh_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)

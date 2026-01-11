@@ -1,25 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException
-from app.auth import get_current_user
-from app.db import get_db
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Annotated
+
+from app.auth import get_current_user
+from app.db import get_db
 from app.models import User, Goal, Level, Roadmap, LevelStatus
-from sqlalchemy import func
 from app.schemas import StatsResponse
-
-
+from app.rate_limiter import check_rate_limit
 
 
 router = APIRouter(prefix="/progression", tags=["progression"])
+
 @router.get("/stats", response_model=StatsResponse)
 async def get_user_progression(
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated["User", Depends(get_current_user)]
 ):
     """
     Retrieve user's progression statistics including total XP, levels completed, and goals achieved.
     """
+    # Rate limiting: 30 requests per minute (read-only, less restrictive)
+    await check_rate_limit(request, "get_stats", limit=30, window=60)
+    
     # Fetch total XP from user
     total_xp = current_user.total_exp
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth import get_current_user
 from app.db import get_db
@@ -11,16 +11,21 @@ from app.ai_service import generate_quiz_for_level
 from app.schemas import QuizSubmitRequest, QuizResultResponse
 from app.models import Level, Roadmap, Goal, User, LevelStatus, GoalStatus
 from app.config import settings
+from app.cache import delete_cache
+from app.rate_limiter import check_rate_limit
 
 router = APIRouter(prefix="/levels", tags=["levels"])
 
-
 @router.get("/{level_id}/quiz")
 async def get_level_quiz(
+    request: Request,
     level_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
+    # Rate limiting: 10 quiz generations per hour (AI generation is expensive)
+    await check_rate_limit(request, "generate_quiz", limit=10, window=60)
+    
     result = await db.execute(
         select(Level)
         .join(Roadmap, Level.roadmap_id == Roadmap.id)
@@ -61,11 +66,15 @@ async def get_level_quiz(
 
 @router.post("/{level_id}/quiz/submit")
 async def submit_level_quiz(
+    request: Request,
     level_id: int,
     quiz_submit: QuizSubmitRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
+    # Rate limiting: 20 quiz submissions per hour
+    await check_rate_limit(request, "submit_quiz", limit=20, window=120)
+    
     result = await db.execute(
         select(Level)
         .join(Roadmap, Level.roadmap_id == Roadmap.id)
@@ -130,6 +139,9 @@ async def submit_level_quiz(
         else:
             message = f"Congratulations! You earned {xp_earned} XP!"
         
+        # Clear relevant caches
+        delete_cache("leaderboard")
+
         await db.commit()
     else:
         message = "You didn't pass this time. Review the topics and try again!"

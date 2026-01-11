@@ -13,12 +13,19 @@ from .auth import hash_password, verify_password, create_access_token, get_curre
 from .schemas import RegisterRequest, UserResponse, TokenResponse, OAuthLoginRequest, UpdateProfileRequest
 from .config import settings
 
+from app.rate_limiter import check_rate_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-
 @router.post("/register", response_model=UserResponse)
-async def register(user_req: RegisterRequest, db: Annotated[AsyncSession, Depends(get_db)]):
+async def register(
+    request: Request,
+    user_req: RegisterRequest, 
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    # Rate limiting: 3 requests per minute
+    await check_rate_limit(request, "register", limit=3, window=60)
+    
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == user_req.email))
     existing_user = result.scalar_one_or_none()
@@ -38,19 +45,22 @@ async def register(user_req: RegisterRequest, db: Annotated[AsyncSession, Depend
 
     return new_user
 
-
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
+    # Rate limiting: 5 requests per minute
+    await check_rate_limit(request, "login", limit=5, window=60)
+
     # find the user by email (OAuth2 sends 'username', we treat it as email)
     result = await db.execute(select(User).where(User.email == form_data.username))
     user = result.scalar_one_or_none()
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+        
     # create access token
     access_token = create_access_token(data={"sub": str(user.id)})
 
@@ -58,48 +68,71 @@ async def login(
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
 
     # set refresh token in HttpOnly cookie
+    # Using samesite="lax" for same-origin requests (localhost:3000 -> localhost:8000)
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
         secure=False,  # Set to True in production with HTTPS
-        samesite="lax",
+        samesite="lax",  # Works for same-origin requests
         max_age=settings.refresh_token_expire_minutes * 60
     )
 
     # add refresh token hash to db
     user.refresh_token_hash = hash_refresh_token(refresh_token)
     await db.commit()
-
+    
     return TokenResponse(access_token=access_token)
 
 # refresh to get new access token
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    request: Request,  # Changed from Response - need Request to read cookies
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    # get refresh token from cookies
-    refresh_token = request.cookies.get("refresh_token")
-    if not refresh_token:
-        raise HTTPException(status_code=401, detail="Refresh token missing")
+    """
+    Refresh access token using refresh token from HttpOnly cookie.
+    The refresh token is automatically sent by the browser via cookies.
+    """
+    try:
+        # get refresh token from cookies
+        refresh_token = request.cookies.get("refresh_token")
+        
+        if not refresh_token:
+            raise HTTPException(status_code=401, detail="Refresh token missing")
+        
+        # decode and validate refresh token (automatically checks exp)
+        try:
+            payload = decode_token(refresh_token)
+        except HTTPException as e:
+            raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+        
+        user_id: str = payload.get("sub")
+        
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+        
+        # get user from db and verify token hash
+        user = await db.get(User, int(user_id))
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        # verify the refresh token hash matches what's stored in db
+        token_hash = hash_refresh_token(refresh_token)
+        if user.refresh_token_hash != token_hash:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+        
+        # create new access token
+        access_token = create_access_token(data={"sub": str(user.id)})
+                
+        return TokenResponse(access_token=access_token)
     
-    # decode and validate refresh token (automatically checks exp)
-    payload = decode_token(refresh_token)  # This already checks expiration!
-    user_id: str = payload.get("sub")
-    
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    # get user from db and verify token hash
-    user = await db.get(User, int(user_id))
-    if not user or user.refresh_token_hash != hash_refresh_token(refresh_token):
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    
-    # create new access token
-    access_token = create_access_token(data={"sub": str(user.id)})
-
-    return TokenResponse(access_token=access_token)
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Catch any unexpected errors
+        raise HTTPException(status_code=500, detail="Internal server error during token refresh")
 
 @router.get("/me", response_model=UserResponse)
 async def get_my_info(current_user: User = Depends(get_current_user)):
@@ -124,6 +157,7 @@ async def update_profile(
 @router.post("/oauth-login", response_model=TokenResponse)
 async def oauth_login(
     oauth_req: OAuthLoginRequest,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
     """
@@ -159,9 +193,25 @@ async def oauth_login(
             user.display_name = oauth_req.display_name
         if oauth_req.profile_picture:
             user.profile_picture = oauth_req.profile_picture
-        await db.commit()
-    
-    # Create our JWT token
+        await db.commit()    
+    # Create access token
     access_token = create_access_token(data={"sub": str(user.id)})
     
+    # Generate refresh token (CRITICAL: OAuth users need this too!)
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    
+    # Set refresh token in HttpOnly cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="none" if settings.environment == "production" else "lax",  # "none" for cross-origin
+        max_age=settings.refresh_token_expire_minutes * 60
+    )
+    
+    # Store refresh token hash in database
+    user.refresh_token_hash = hash_refresh_token(refresh_token)
+    await db.commit()
+        
     return TokenResponse(access_token=access_token)

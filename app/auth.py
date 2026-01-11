@@ -22,7 +22,7 @@ def hash_refresh_token(token: str) -> str:
 
 # JWT related functions would go here
 from datetime import datetime, timedelta, timezone
-from jose import jwt
+from jose import jwt, ExpiredSignatureError
 from .config import settings
 
 def create_access_token(data: dict):
@@ -36,10 +36,18 @@ def create_refresh_token(data: dict):
 
 
 def decode_token(token: str):
+    """
+    Decode and validate a JWT token.
+    Raises HTTPException if token is invalid or expired.
+    """
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         return payload
-    except jwt.JWTError:
+    except ExpiredSignatureError:
+        print("❌ Token expired")
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.JWTError as e:
+        print(f"❌ JWT decode error: {type(e).__name__}: {str(e)}")
         raise HTTPException(status_code=401, detail="Could not validate credentials")
 
 def _create_token(data: dict, expires_delta: timedelta):
