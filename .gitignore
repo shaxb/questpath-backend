@@ -48,3 +48,5 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+multipass_deploy_key
+multipass_deploy_key.pub
