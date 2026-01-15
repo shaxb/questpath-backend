@@ -1,0 +1,70 @@
+name: Build and Deploy to VM
+
+# Trigger on push to main branch
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  # Job 1: Build and push Docker image
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            shaxboz777/questpath:latest
+            shaxboz777/questpath:${{ github.sha }}
+          cache-from: type=registry,ref=shaxboz777/questpath:latest
+          cache-to: type=inline
+  
+  # Job 2: Deploy to VM
+  deploy:
+    name: Deploy to Multipass VM
+    needs: build  # Wait for build to complete
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ubuntu
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            cd /home/ubuntu
+            echo "Pulling latest image..."
+            docker compose pull
+            echo "Restarting containers..."
+            docker compose up -d
+            echo "Waiting for app to be ready..."
+            sleep 10
+            echo "Running health check..."
+            curl -f http://localhost:8000/health || exit 1
+            echo "Deployment successful!"
+      
+      - name: Notify deployment success
+        if: success()
+        run: echo "✅ Deployed to VM successfully!"
+      
+      - name: Notify deployment failure
+        if: failure()
+        run: echo "❌ Deployment failed!"
