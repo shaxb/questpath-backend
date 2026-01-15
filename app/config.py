@@ -14,10 +14,6 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15  # 15 minutes
     refresh_token_expire_minutes: int = 60 * 24 * 30  # 30 days
     
-    # OAuth
-    google_client_id: str | None = None
-    google_client_secret: str | None = None
-    
     # OpenAI
     openai_api_key: str
     
@@ -26,6 +22,15 @@ class Settings(BaseSettings):
     
     # Environment
     environment: str = "development"
+    
+    # Logging control
+    debug: bool = True  # Set to False in production
+    log_sql_queries: bool = False  # SQLAlchemy query logging
+    log_http_requests: bool = True  # Uvicorn access logs
+    
+    # Error Tracking
+    sentry_dsn: str | None = None  # Add to .env for production error tracking
+    sentry_traces_sample_rate: float = 0.1  # 10% of requests traced
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

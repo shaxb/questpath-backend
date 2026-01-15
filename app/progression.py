@@ -9,6 +9,7 @@ from app.db import get_db
 from app.models import User, Goal, Level, Roadmap, LevelStatus
 from app.schemas import StatsResponse
 from app.rate_limiter import check_rate_limit
+from .logger import logger
 
 
 router = APIRouter(prefix="/progression", tags=["progression"])

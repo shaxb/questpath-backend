@@ -1,7 +1,10 @@
 from openai import AsyncOpenAI
-from app.config import settings
 import json
 from typing import Dict, Any
+
+from app.config import settings
+from app.logger import logger
+
 
 
 async def generate_roadmap(goal_description: str) -> Dict[str, Any]:
@@ -116,11 +119,13 @@ Make it practical, actionable, and motivating. NO markdown, NO code blocks, NO e
 
         return roadmap_data
 
-    except ValueError:
+    except ValueError as e:
+        logger.error("Validation error in roadmap generation", error=str(e))
         # Re-raise validation errors
         raise
     except Exception as e:
         # Wrap other errors
+        logger.error("Failed to generate roadmap", error=str(e), event="roadmap_generation_error")
         raise Exception(f"Failed to generate roadmap: {str(e)}")
     
 
@@ -221,7 +226,10 @@ NO markdown, NO code blocks, NO explanations, ONLY the JSON object."""
         
         return quiz_data
     
-    except ValueError:
+    except ValueError as e:
+        logger.error("Validation error in quiz generation", error=str(e))
+        # Re-raise validation errors
         raise
     except Exception as e:
+        logger.error("Failed to generate quiz", error=str(e), event="quiz_generation_error")
         raise Exception(f"Failed to generate quiz: {str(e)}")

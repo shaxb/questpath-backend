@@ -11,6 +11,7 @@ from app.cache import get_cache, set_cache
 from app.models import User
 from app.schemas import LeaderboardResponse
 from app.rate_limiter import check_rate_limit
+from .logger import logger
 
 
 router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])

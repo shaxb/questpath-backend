@@ -1,0 +1,189 @@
+# ============================================
+# Docker Compose - Multi-service orchestration
+# ============================================
+# This file defines and connects all your services:
+# - PostgreSQL database
+# - Redis cache
+# - FastAPI application
+
+version: '3.8'
+
+# ============================================
+# Services - Individual containers
+# ============================================
+services:
+  
+  # --------------------------------------------
+  # PostgreSQL Database Container
+  # --------------------------------------------
+  db:
+    # Use official PostgreSQL image from Docker Hub
+    image: postgres:15-alpine
+    
+    # Container name (easier to reference than random ID)
+    container_name: questpath-db
+    
+    # Environment variables for PostgreSQL initialization
+    environment:
+      # Database name to create on first startup
+      POSTGRES_DB: questpath
+      
+      # Username for database access
+      POSTGRES_USER: questpath_user
+      
+      # Password - NEVER hardcode in production!
+      # Use .env file or secrets management
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      
+      # PostgreSQL performance tuning
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    
+    # Port mapping: host:container
+    # Commented out for security - only containers should access DB
+    # Uncomment for local development if you want to connect with pgAdmin
+    # ports:
+    #   - "5432:5432"
+    
+    # Volume - Persist database data
+    # Without this, data is lost when container stops!
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    
+    # Network - Connect to custom network for inter-container communication
+    networks:
+      - questpath-net
+    
+    # Health check - Is PostgreSQL ready to accept connections?
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U questpath_user -d questpath"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    # Restart policy - Always restart if container crashes
+    restart: unless-stopped
+
+  # --------------------------------------------
+  # Redis Cache Container
+  # --------------------------------------------
+  redis:
+    # Use official Redis image (alpine = small size)
+    image: redis:7-alpine
+    
+    container_name: questpath-redis
+    
+    # Redis command with persistence enabled
+    # appendonly yes: Enable AOF persistence (survives restarts)
+    command: redis-server --appendonly yes
+    
+    # Uncomment to expose Redis port for debugging
+    # ports:
+    #   - "6379:6379"
+    
+    # Volume - Persist Redis data
+    volumes:
+      - redis_data:/data
+    
+    networks:
+      - questpath-net
+    
+    # Health check - Is Redis responding?
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    
+    restart: unless-stopped
+
+  # --------------------------------------------
+  # FastAPI Application Container
+  # --------------------------------------------
+  app:
+    # Build from local Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    container_name: questpath-app
+    
+    # Port mapping - Expose app to host machine
+    # Access at http://localhost:8000
+    ports:
+      - "8000:8000"
+    
+    # Environment variables for application
+    environment:
+      # Database connection
+      # 'db' is the service name - Docker DNS resolves it to container IP
+      DATABASE_URL: postgresql+asyncpg://questpath_user:${DB_PASSWORD:-changeme}@db:5432/questpath
+      
+      # Redis connection
+      REDIS_URL: redis://redis:6379
+      
+      # Application settings
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-true}
+      
+      # JWT Authentication
+      JWT_SECRET: ${JWT_SECRET}
+      
+      # OpenAI API key
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      
+      # Sentry error tracking (optional)
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      
+      # Frontend URL for CORS
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    
+    # Wait for database and redis to be healthy before starting app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    networks:
+      - questpath-net
+    
+    # Volume - Mount code for development (hot reload)
+    # Comment out in production for security
+    volumes:
+      - ./app:/app/app:ro  # Read-only mount
+      - ./logs:/app/logs   # Logs directory (writable)
+    
+    # Health check - Is FastAPI responding?
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    restart: unless-stopped
+
+# ============================================
+# Networks - Virtual networks for containers
+# ============================================
+networks:
+  questpath-net:
+    # Bridge network - containers can communicate via service names
+    driver: bridge
+    
+    # Optional: Configure subnet
+    # ipam:
+    #   config:
+    #     - subnet: 172.20.0.0/16
+
+# ============================================
+# Volumes - Named volumes for data persistence
+# ============================================
+volumes:
+  # PostgreSQL data - survives container deletion
+  postgres_data:
+    driver: local
+  
+  # Redis data - survives container deletion
+  redis_data:
+    driver: local

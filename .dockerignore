@@ -1,0 +1,65 @@
+# ============================================
+# .dockerignore - Files to exclude from Docker build
+# ============================================
+# Similar to .gitignore but for Docker
+# Keeps Docker image small and build fast
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments (don't copy your local venv!)
+venv/
+env/
+ENV/
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation (not needed in production)
+README.md
+LEARNING-ROADMAP.md
+TECHNICAL-IMPROVEMENTS.md
+TESTING-GUIDE.md
+
+# Environment files (secrets should be passed as env vars)
+.env
+.env.local
+
+# Logs (will be generated fresh in container)
+logs/
+*.log
+
+# Database files (if you have local SQLite)
+*.db
+*.sqlite
+
+# Node modules (if you have any frontend tools)
+node_modules/

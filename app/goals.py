@@ -11,10 +11,12 @@ from .schemas import CreateGoalRequest, GoalResponse, GoalListItem
 from .auth import get_current_user
 from .ai_service import generate_roadmap
 from .rate_limiter import check_rate_limit
+from .logger import logger
+from .metrics import metrics
 
 router = APIRouter(prefix="/goals", tags=["goals"])
 
-
+# Endpoint to create a new goal with AI-generated roadmap
 @router.post("", response_model=GoalResponse, status_code=201)
 async def create_goal(
     request: Request,
@@ -81,17 +83,24 @@ async def create_goal(
         )
         goal = result.scalar_one()
         
+        # Track business metric
+        metrics.increment_business_metric("goals_created")
+        
         return goal
         
     except ValueError as e:
         # AI validation errors
+        logger.error("Invalid goal data from AI", error=str(e), event="invalid_goal_data")
         raise HTTPException(status_code=400, detail=f"Invalid goal: {str(e)}")
     except Exception as e:
         # Other errors (OpenAI API, database, etc.)
+        logger.error("Failed to create goal", error=str(e), event="goal_creation_error")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to create goal: {str(e)}")
 
 
+
+# Endpoint to get all goals for the current user (without roadmap details)
 @router.get("/me", response_model=List[GoalListItem])
 async def get_my_goals(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -108,7 +117,7 @@ async def get_my_goals(
     goals = result.scalars().all()
     return goals
 
-
+# Endpoint to get a specific goal with full roadmap and levels
 @router.get("/{goal_id}", response_model=GoalResponse)
 async def get_goal(
     goal_id: int,
@@ -126,13 +135,13 @@ async def get_goal(
     goal = result.scalar_one_or_none()
 
     if not goal:
+        logger.error("Goal not found", goal_id=goal_id, user_id=current_user.id, event="goal_not_found")
         raise HTTPException(status_code=404, detail="Goal not found")
     
     return goal
 
 
 # Additional endpoints for updating goal status
-
 @router.patch("/levels/{level_id}/topics/{topic_index}")
 async def mark_topic(
     level_id: int,
@@ -153,10 +162,12 @@ async def mark_topic(
     level = result.scalar_one_or_none()
     
     if not level:
+        logger.error("Level not found for marking topic", level_id=level_id, user_id=current_user.id, event="level_not_found")
         raise HTTPException(status_code=404, detail="Level not found")
     
     # Update the topic's completed status
     if level.topics is None or topic_index < 0 or topic_index >= len(level.topics):
+        logger.error("Invalid topic index for marking topic", level_id=level_id, topic_index=topic_index, event="invalid_topic_index")
         raise HTTPException(status_code=400, detail="Invalid topic index")
     
     level.topics[topic_index]["completed"] = not level.topics[topic_index]["completed"]

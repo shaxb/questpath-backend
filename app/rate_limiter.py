@@ -4,8 +4,10 @@ Rate limiting utilities using Redis.
 Implements token bucket algorithm via Redis INCR + EXPIRE.
 """
 from fastapi import HTTPException, Request
-from app.cache import redis_client
 import logging
+
+from .cache import redis_client
+from .logger import logger
 
 logger = logging.getLogger(__name__)
 

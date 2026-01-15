@@ -12,19 +12,22 @@ from .models import User
 from .auth import hash_password, verify_password, create_access_token, get_current_user, create_refresh_token, hash_refresh_token, decode_token
 from .schemas import RegisterRequest, UserResponse, TokenResponse, OAuthLoginRequest, UpdateProfileRequest
 from .config import settings
-
+from .cache import delete_cache
+from .logger import logger
 from app.rate_limiter import check_rate_limit
+from .metrics import metrics
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# User registration endpoint
 @router.post("/register", response_model=UserResponse)
 async def register(
     request: Request,
     user_req: RegisterRequest, 
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    # Rate limiting: 3 requests per minute
-    await check_rate_limit(request, "register", limit=3, window=60)
+    # Rate limiting: 5 requests per minute
+    await check_rate_limit(request, "register", limit=5, window=60)
     
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == user_req.email))
@@ -43,6 +46,11 @@ async def register(
     await db.commit()
     await db.refresh(new_user)
 
+    # Track business metric
+    metrics.increment_business_metric("users_registered")
+
+    # delete leaderboard cache as new user is added
+    delete_cache("leaderboard")
     return new_user
 
 @router.post("/login", response_model=TokenResponse)
@@ -115,6 +123,7 @@ async def refresh_token(
         # get user from db and verify token hash
         user = await db.get(User, int(user_id))
         if not user:
+            logger.error(f"User not found during token refresh", user_id=user_id, event="user_not_found_refresh")
             raise HTTPException(status_code=401, detail="User not found")
         
         # verify the refresh token hash matches what's stored in db
@@ -132,13 +141,15 @@ async def refresh_token(
         raise
     except Exception as e:
         # Catch any unexpected errors
+        logger.error(f"Error during token refresh: {e}", event="token_refresh_error")
         raise HTTPException(status_code=500, detail="Internal server error during token refresh")
 
+# get current user info
 @router.get("/me", response_model=UserResponse)
 async def get_my_info(current_user: User = Depends(get_current_user)):
     return current_user
 
-
+# `Update user profile endpoint [display name] only`
 @router.patch("/me", response_model=UserResponse)
 async def update_profile(
     update_req: UpdateProfileRequest,

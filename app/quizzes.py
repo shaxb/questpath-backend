@@ -5,17 +5,20 @@ from app.db import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Annotated
+from sqlalchemy.orm import selectinload
+
 
 from app.ai_service import generate_quiz_for_level
-
-from app.schemas import QuizSubmitRequest, QuizResultResponse
+from app.schemas import QuizSubmitRequest
 from app.models import Level, Roadmap, Goal, User, LevelStatus, GoalStatus
-from app.config import settings
 from app.cache import delete_cache
 from app.rate_limiter import check_rate_limit
+from .logger import logger
+from .metrics import metrics
 
 router = APIRouter(prefix="/levels", tags=["levels"])
 
+# Endpoint to generate and retrieve quiz for a specific level
 @router.get("/{level_id}/quiz")
 async def get_level_quiz(
     request: Request,
@@ -23,8 +26,8 @@ async def get_level_quiz(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    # Rate limiting: 10 quiz generations per hour (AI generation is expensive)
-    await check_rate_limit(request, "generate_quiz", limit=10, window=60)
+    # Rate limiting: 10 quiz generations 6 minutes (AI generation is expensive)
+    await check_rate_limit(request, "generate_quiz", limit=10, window=360)
     
     result = await db.execute(
         select(Level)
@@ -34,6 +37,7 @@ async def get_level_quiz(
     )
     level = result.scalars().first()
     if not level:
+        logger.error("Level not found for quiz generation", level_id=level_id, user_id=current_user.id, event="level_not_found_quiz")
         raise HTTPException(status_code=404, detail="Level not found")
     
     # Check if all topics are completed before allowing quiz
@@ -47,23 +51,27 @@ async def get_level_quiz(
     try:
         quiz_data = await generate_quiz_for_level(level.title, level.topics or [])
         
+        # Track business metric
+        metrics.increment_business_metric("quizzes_generated")
+        
         # Add level info and time limit
         response = {
             "level_id": level.id,
             "level_title": level.title,
-            "time_limit": 300,  # 5 minutes
+            "time_limit": 300,  # 5 minutes # depricated, handled on frontend
             "questions": quiz_data["questions"]
         }
         
         return response
     except Exception as e:
+        logger.error("Failed to generate quiz", level_id=level_id, error=str(e), event="quiz_generation_failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 
 
 
-
+# submit quiz answers for a specific level
 @router.post("/{level_id}/quiz/submit")
 async def submit_level_quiz(
     request: Request,
@@ -72,17 +80,25 @@ async def submit_level_quiz(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    # Rate limiting: 20 quiz submissions per hour
+    # Rate limiting: 20 quiz submissions per 2 minutes
     await check_rate_limit(request, "submit_quiz", limit=20, window=120)
     
+    # ✅ OPTIMIZED: Load level with ALL related data in one go
     result = await db.execute(
         select(Level)
+        .options(
+            selectinload(Level.roadmap).selectinload(Roadmap.goal),    # Load roadmap → goal
+            selectinload(Level.roadmap).selectinload(Roadmap.levels)   # Load roadmap → all levels
+        )
         .join(Roadmap, Level.roadmap_id == Roadmap.id)
         .join(Goal, Roadmap.goal_id == Goal.id)
         .where(Level.id == level_id, Goal.user_id == current_user.id)
     )
-    level = result.scalars().first()
+
+    level = result.scalar_one_or_none()
+
     if not level:
+        logger.error("Level not found for quiz submission", level_id=level_id, user_id=current_user.id, event="level_not_found_quiz_submit")
         raise HTTPException(status_code=404, detail="Level not found")
     
     # Initialize response values
@@ -102,35 +118,18 @@ async def submit_level_quiz(
         if level.status != LevelStatus.COMPLETED:
             level.status = LevelStatus.COMPLETED
    
-        # change goal status to in progress or completed
-        goal_result = await db.execute(
-            select(Goal)
-            .join(Roadmap, Goal.id == Roadmap.goal_id)
-            .join(Level, Roadmap.id == Level.roadmap_id)
-            .where(Level.id == level.id)
-        )
-        goal = goal_result.scalars().first()
-        if goal:
-            # Check if all levels in the roadmap are completed
-            levels_result = await db.execute(
-                select(Level)
-                .where(Level.roadmap_id == level.roadmap_id)
-            )
-            levels = levels_result.scalars().all()
-            if all(l.status == LevelStatus.COMPLETED for l in levels):
-                goal.status = GoalStatus.COMPLETED
-            else:
-                goal.status = GoalStatus.IN_PROGRESS
+        # ✅ OPTIMIZED: Use pre-loaded data (no additional queries!)
+        goal = level.roadmap.goal  # Already loaded via selectinload
+        all_levels = level.roadmap.levels  # Already loaded via selectinload
+        
+        # Check if all levels in the roadmap are completed
+        if all(l.status == LevelStatus.COMPLETED for l in all_levels):
+            goal.status = GoalStatus.COMPLETED
+        else:
+            goal.status = GoalStatus.IN_PROGRESS
 
-        # Unlock next level
-        next_level_result = await db.execute(
-            select(Level)
-            .where(
-                Level.roadmap_id == level.roadmap_id,
-                Level.order == level.order + 1
-            )
-        )
-        next_level = next_level_result.scalars().first()
+        # Find next level (no query needed!)
+        next_level = next((l for l in all_levels if l.order == level.order + 1), None)
         
         if next_level and next_level.status == LevelStatus.LOCKED:
             next_level.status = LevelStatus.UNLOCKED
@@ -141,6 +140,9 @@ async def submit_level_quiz(
         
         # Clear relevant caches
         delete_cache("leaderboard")
+        
+        # Track business metric
+        metrics.increment_business_metric("quizzes_completed")
 
         await db.commit()
     else:
